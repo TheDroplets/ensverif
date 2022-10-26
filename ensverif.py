@@ -589,7 +589,7 @@ def rankhist(ens, obs):
 
     print('Warning: This function does not plot any figure! To plot the rank \
           histogram, first import matplotlib ("import matplotlib.pyplot as plt")\
-         and then "plt.hist(rel_freq, bins)"')
+         and then "plt.bar(bins[1:len(bins)],rel_freq)"')
 
     return rel_freq, bins
 
