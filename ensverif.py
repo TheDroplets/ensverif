@@ -180,6 +180,9 @@ def crps_hersbach_decomposition(ens, obs):
     alpha = np.zeros((rows,columns+1))
     beta = np.zeros((rows,columns+1))
 
+    n_outliers_left = 0
+    n_outliers_right = 0
+
     for i in range(rows):
         # if the observation does not exist, no ens for alpha and beta
         if ~np.isnan(obs[i]):
@@ -189,6 +192,7 @@ def crps_hersbach_decomposition(ens, obs):
                     if obs[i] < ensemble_sort[0]:
                         alpha[i,k] = 0
                         beta[i,k] = ensemble_sort[0] - obs[i]
+                        n_outliers_left = n_outliers_left + 1
                     else:
                         alpha[i,k] = 0
                         beta[i,k] = 0
@@ -196,6 +200,7 @@ def crps_hersbach_decomposition(ens, obs):
                     if obs[i] > ensemble_sort[columns-1]:
                         alpha[i,k] = obs[i] - ensemble_sort[columns-1]
                         beta[i,k] = 0
+                        n_outliers_right = n_outliers_right + 1
                     else:
                         alpha[i,k] = 0
                         beta[i,k] = 0
@@ -221,7 +226,13 @@ def crps_hersbach_decomposition(ens, obs):
     beta1 = np.nanmean(beta, axis=0)
 
     g_component = alpha1 + beta1
+    g_component[g_component==0] = np.nan
     o_component = beta1 / g_component
+
+    o_component[0] = n_outliers_left / rows
+    g_component[0] = 0 if o_component[0] == 0 else beta1[0] / o_component[0]
+    o_component[columns] = n_outliers_right / rows
+    g_component[columns] = alpha1[columns] / (1. - o_component[columns])
 
     weight = np.arange(columns+1) / columns
     reliability_component = np.nansum(g_component * np.power(o_component - weight, 2))
