@@ -142,17 +142,30 @@ def crps(ens, obs, distribution):
 
 def crps_hersbach_decomposition(eps, obs):
     """
-    Calculate CRPS decomposition from observations and ensemble forecast.
+    This function decomposes the CRPS into reliability and "potential"
+    components according to Hersbach (2000). The potential CRPS
+    represents the best possible CRPS value that could be achieved, if forecasts
+    were perfectly reliable.
 
-    Args:
-        obs (numpy.ndarray): Array of observed values.
-        eps (numpy.ndarray): Ensemble forecast array.
+    Parameters
+    ----------
+    eps : Ensemble forecasts or ensemble simulations. It must be a T x M matrix,
+        with T the time steps and M the members.
+    obs : A vector of corresponding observations to match the forecasts. It must
+        be a T x 1 vector
 
-    Returns:
-        dict: Dictionary containing alpha, beta, heaviside_0, and heaviside_n arrays.
+    Returns
+    -------
+    crps_tot : The total CRPS (reliability + potential)
+    reliability_component : The reliability component of the CRPS according to Hersbach (2000)
+    potential_component : The potential component of the CRPS according to Hersbach (2000)
+
+    Hersbach, H., 2000. Decomposition of the continuous ranked probability score
+    for ensemble prediction systems. Weather Forecast. 15, 550?570.
 
     Author:
         Ronald Frenette, Severe Weather Lab, Quebec region, Jun 2009
+        Vincent Fortin, ECCC and chatGPT3.5 for the python version, Nov 2023
     """
     n_member = eps.shape[1]
     n_obs = len(obs)
@@ -197,17 +210,22 @@ def crps_from_alpha_beta(alpha, beta, heaviside_0, heaviside_n):
     """
     Calculate CRPS from alpha, beta, heavisides.
 
-    Args:
+    Parameters
+    ----------
         alpha (numpy.ndarray): Alpha array from crps_decomposition.
         beta (numpy.ndarray): Beta array from crps_decomposition.
         heaviside_0 (numpy.ndarray): Heaviside array for first outliers from crps_decomposition.
         heaviside_n (numpy.ndarray): Heaviside array for last outliers from crps_decomposition.
 
-    Returns:
-        dict: Dictionary containing CRPS, CRPSpot, and Reli.
+    Returns
+    -------
+    crps_tot : The total CRPS (reliability + potential)
+    reliability_component : The reliability component of the CRPS according to Hersbach (2000)
+    potential_component : The potential component of the CRPS according to Hersbach (2000)
 
     Author:
         Ronald Frenette, Severe Weather Lab, Quebec region, Jun 2009
+        Vincent Fortin, ECCC and chatGPT3.5 for the python version, Nov 2023
     """
     n_member = alpha.shape[1] - 1
     reli = 0
