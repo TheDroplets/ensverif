@@ -140,7 +140,7 @@ def crps(ens, obs, distribution):
 
     return np.nanmean(crps_matrix)
 
-def crps_hersbach_decomposition(ens, obs):
+def crps_hersbach_decomposition(eps, obs):
     """
     This function decomposes the CRPS into reliability and "potential"
     components according to Hersbach (2000). The potential CRPS
@@ -149,7 +149,7 @@ def crps_hersbach_decomposition(ens, obs):
 
     Parameters
     ----------
-    ens : Ensemble forecasts or ensemble simulations. It must be a T x M matrix,
+    eps : Ensemble forecasts or ensemble simulations. It must be a T x M matrix,
         with T the time steps and M the members.
     obs : A vector of corresponding observations to match the forecasts. It must
         be a T x 1 vector
@@ -160,75 +160,111 @@ def crps_hersbach_decomposition(ens, obs):
     reliability_component : The reliability component of the CRPS according to Hersbach (2000)
     potential_component : The potential component of the CRPS according to Hersbach (2000)
 
-    Hersbach, H., 2000. Decomposition of the continuous ranked probability score \
-    for ensemble prediction systems. Weather Forecast. 15, 550–570.
+    Hersbach, H., 2000. Decomposition of the continuous ranked probability score
+    for ensemble prediction systems. Weather Forecast. 15, 550?570.
 
+    Author:
+        Ronald Frenette, Severe Weather Lab, Quebec region, Jun 2009
+        Vincent Fortin, ECCC and chatGPT3.5 for the python version, Nov 2023
     """
+    n_member = eps.shape[1]
+    n_obs = len(obs)
+    alpha = np.zeros((n_obs, n_member + 1))
+    beta = np.zeros((n_obs, n_member + 1))
+    heaviside_0 = np.zeros(n_obs)
+    heaviside_n = np.zeros(n_obs)
 
-    ens = np.array(ens, dtype='float64')
-    obs = np.array(obs, dtype='float64')
-    dim1 = ens.shape
-    if len(dim1) == 1:
-        ens = ens.reshape((1,dim1[0]))
-    dim2 = obs.shape
-    if len(dim2) == 0:
-        obs = obs.reshape((1,1))
-    elif len(dim2) == 1:
-        obs = obs.reshape((dim2[0],1))
+    prev = np.sort(eps, axis=1)
 
-    rows, columns = ens.shape
-    alpha = np.zeros((rows,columns+1))
-    beta = np.zeros((rows,columns+1))
+    # Calculate alpha and beta of observation
+    # heaviside for the two outliers
 
-    for i in range(rows):
-        # if the observation does not exist, no ens for alpha and beta
-        if ~np.isnan(obs[i]):
-            ensemble_sort = np.sort(ens[i])
-            for k in range(columns+1):
-                if k == 0:
-                    if obs[i] < ensemble_sort[0]:
-                        alpha[i,k] = 0
-                        beta[i,k] = ensemble_sort[0] - obs[i]
-                    else:
-                        alpha[i,k] = 0
-                        beta[i,k] = 0
-                elif k == columns:
-                    if obs[i] > ensemble_sort[columns-1]:
-                        alpha[i,k] = obs[i] - ensemble_sort[columns-1]
-                        beta[i,k] = 0
-                    else:
-                        alpha[i,k] = 0
-                        beta[i,k] = 0
-                else:
-                    if obs[i] > ensemble_sort[k]:
-                        alpha[i,k] = ensemble_sort[k] - ensemble_sort[k-1]
-                        beta[i,k] = 0
-                    elif obs[i] < ensemble_sort[k-1]:
-                        alpha[i,k] = 0
-                        beta[i,k] = ensemble_sort[k] - ensemble_sort[k-1]
-                    elif (obs[i] >= ensemble_sort[k-1]) and (obs[i] <= ensemble_sort[k]):
-                        alpha[i,k] = obs[i] - ensemble_sort[k-1]
-                        beta[i,k] = ensemble_sort[k] - obs[i]
-                    else:
-                        alpha[i,k] = np.nan
-                        beta[i,k] = np.nan
-        else:
-            alpha[i,:] = np.nan
-            beta[i,:] = np.nan
+    # 1) Beta and alpha for Outliers
+    index = np.where(obs < prev[:, 0])
+    beta[index, 0] = prev[index, 0] - obs[index]
+    index = np.where(obs > prev[:, n_member - 1])
+    alpha[index, n_member] = obs[index] - prev[index, n_member - 1]
 
+    # 2) Heavisides for Outliers
+    index = np.where(obs <= prev[:, 0])
+    heaviside_0[index] = 1
+    index = np.where(obs <= prev[:, n_member - 1])
+    heaviside_n[index] = 1
 
-    alpha1 = np.nanmean(alpha, axis=0)
-    beta1 = np.nanmean(beta, axis=0)
+    # 3) Non-outlier
+    for i in range(n_member - 1):
+        index = np.where(obs > prev[:, i + 1])
+        alpha[index, i + 1] = prev[index, i + 1] - prev[index, i]
+        index = np.where(obs < prev[:, i])
+        beta[index, i + 1] = prev[index, i + 1] - prev[index, i]
+        index = np.where((prev[:, i + 1] > obs) & (obs > prev[:, i]))
+        alpha[index, i + 1] = obs[index] - prev[index, i]
+        beta[index, i + 1] = prev[index, i + 1] - obs[index]
 
-    g_component = alpha1 + beta1
-    o_component = beta1 / g_component
-
-    weight = np.arange(columns+1) / columns
-    reliability_component = np.nansum(g_component * np.power(o_component - weight, 2))
-    potential_component = np.nansum(g_component * o_component * (1 - o_component))
-    crps_tot = reliability_component + potential_component
+    # Compute the components of CRPS from these quantities
+    crps_tot, reliability_component, potential_component = crps_from_alpha_beta(alpha, beta, heaviside_0, heaviside_n)
 
     return crps_tot, reliability_component, potential_component
+
+def crps_from_alpha_beta(alpha, beta, heaviside_0, heaviside_n):
+    """
+    Calculate CRPS from alpha, beta, heavisides.
+
+    Parameters
+    ----------
+        alpha (numpy.ndarray): Alpha array from crps_decomposition.
+        beta (numpy.ndarray): Beta array from crps_decomposition.
+        heaviside_0 (numpy.ndarray): Heaviside array for first outliers from crps_decomposition.
+        heaviside_n (numpy.ndarray): Heaviside array for last outliers from crps_decomposition.
+
+    Returns
+    -------
+    crps_tot : The total CRPS (reliability + potential)
+    reliability_component : The reliability component of the CRPS according to Hersbach (2000)
+    potential_component : The potential component of the CRPS according to Hersbach (2000)
+
+    Author:
+        Ronald Frenette, Severe Weather Lab, Quebec region, Jun 2009
+        Vincent Fortin, ECCC and chatGPT3.5 for the python version, Nov 2023
+    """
+    n_member = alpha.shape[1] - 1
+    reli = 0
+    crps_pot = 0
+
+    for i in range(n_member + 1):
+        index = i
+
+        mean_oi = 0
+        mean_gi = 0
+
+        # Outlier
+        if i == 0:
+            mean_beta = np.mean(beta[:, index])
+            mean_oi = np.mean(heaviside_0)
+            if mean_oi != 0:
+                mean_gi = mean_beta / mean_oi
+
+        if i == n_member:
+            mean_oi = np.mean(heaviside_n)
+            mean_alpha = np.mean(alpha[:, index])
+            if mean_oi != 1:
+                mean_gi = mean_alpha / (1 - mean_oi)
+
+        # Non-outliers
+        if 0 < i < n_member:
+            mean_beta = np.mean(beta[:, index])
+            mean_alpha = np.mean(alpha[:, index])
+            mean_oi = mean_beta / (mean_alpha + mean_beta)
+            mean_gi = mean_alpha + mean_beta
+
+        pi = i / n_member
+
+        reli += mean_gi * (mean_oi - pi) * (mean_oi - pi)
+        crps_pot += mean_gi * mean_oi * (1.0 - mean_oi)
+
+    crps = reli + crps_pot
+
+    return crps, reli, crps_pot
 
 def logscore(ens, obs, distribution, thres=0, options=None):
     """
